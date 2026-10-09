@@ -18,6 +18,8 @@ if (!model) {
   throw new Error("AKASHML_MODEL is not configured");
 }
 
+const modelName: string = model;
+
 export const akashml = new OpenAI({
   apiKey,
   baseURL,
@@ -40,7 +42,7 @@ export async function explainFinding(finding: Finding): Promise<string> {
   };
 
   const response = await akashml.chat.completions.create({
-    model,
+    model: modelName,
     temperature: 0.2,
     messages: [
       {
