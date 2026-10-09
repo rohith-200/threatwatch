@@ -1,0 +1,153 @@
+{
+  "analysisId": "an_fixture_001",
+  "repo": "your-team/acme-checkout-api",
+  "commit": "a1b2c3d",
+  "analyzedAt": "2026-10-09T10:42:00Z",
+  "lookbackDays": 30,
+  "traceId": null,
+  "coverage": {
+    "dependencies": 186,
+    "directDependencies": 9,
+    "recentAdvisoriesChecked": 1240,
+    "kevChecked": 19,
+    "threatDataFetchedAt": "2026-10-09T10:42:00Z",
+    "newestAdvisoryPublished": "2026-10-09T07:15:00Z",
+    "fromCache": false
+  },
+  "summary": {
+    "newAffecting": 2,
+    "knownAffecting": 2,
+    "notAffecting": 1257,
+    "sinceLastAnalysis": 1
+  },
+  "alerts": [
+    {
+      "canonicalId": "CVE-FIXTURE-0001",
+      "aliases": ["GHSA-fixt-0001-aaaa"],
+      "title": "Signature verification bypass",
+      "package": "jsonwebtoken",
+      "installedVersion": "8.5.1",
+      "fixedVersion": "9.0.0",
+      "isDirect": true,
+      "severity": "critical",
+      "published": "2026-10-07T00:00:00Z",
+      "isNew": true,
+      "inKev": false,
+      "epss": 0.4,
+      "status": "likely_affected",
+      "riskScore": 92,
+      "scoreBreakdown": { "severity": 40, "epss": 12, "semgrep": 15, "direct": 10, "recent": 10, "fixAvailable": 5 },
+      "evidence": [{ "ruleId": "jwt-verify-untrusted", "file": "src/routes/auth.js", "line": 22 }],
+      "sources": ["osv", "ghsa"],
+      "simulated": false,
+      "advice": {
+        "summary": "The installed jsonwebtoken version can accept tokens it should reject, and your login route verifies tokens taken from the request.",
+        "attackPath": {
+          "entryPoint": "POST /login",
+          "howItReachesYou": "src/routes/auth.js:22 passes the token from the request body to jwt.verify on the vulnerable version.",
+          "impact": "An attacker could present a token that passes verification and act as another user."
+        },
+        "exploitedInWild": "Not in CISA KEV; EPSS 40%",
+        "fix": { "action": "Upgrade jsonwebtoken", "targetVersion": "9.0.0", "verified": true },
+        "confidenceNote": "Likely affected based on current evidence."
+      },
+      "evidenceCheck": "passed"
+    },
+    {
+      "canonicalId": "CVE-FIXTURE-0002",
+      "aliases": ["GHSA-fixt-0002-bbbb"],
+      "title": "Actively exploited request parsing flaw",
+      "package": "body-parser",
+      "installedVersion": "1.20.2",
+      "fixedVersion": "1.20.3",
+      "isDirect": true,
+      "severity": "critical",
+      "published": "2026-10-09T09:00:00Z",
+      "isNew": true,
+      "inKev": true,
+      "epss": null,
+      "status": "potentially_affected",
+      "riskScore": 90,
+      "scoreBreakdown": { "severity": 40, "kev": 25, "direct": 10, "recent": 10, "fixAvailable": 5 },
+      "evidence": [],
+      "sources": ["kev"],
+      "simulated": true,
+      "advice": {
+        "summary": "A simulated advisory reports that this body-parser version is being exploited in the wild. No code in this repo was found calling the affected feature directly.",
+        "attackPath": {
+          "entryPoint": "Any route that parses request bodies",
+          "howItReachesYou": "body-parser is a direct dependency, but no Semgrep rule matched a specific usage.",
+          "impact": "Depends on how request bodies are handled; review routes that accept user input."
+        },
+        "exploitedInWild": "In CISA KEV (simulated)",
+        "fix": { "action": "Upgrade body-parser", "targetVersion": "1.20.3", "verified": true },
+        "confidenceNote": "Potentially affected based on current evidence. This alert is simulated for the demo."
+      },
+      "evidenceCheck": "passed"
+    },
+    {
+      "canonicalId": "CVE-FIXTURE-0003",
+      "aliases": ["GHSA-fixt-0003-cccc"],
+      "title": "Prototype pollution",
+      "package": "lodash",
+      "installedVersion": "4.17.15",
+      "fixedVersion": "4.17.21",
+      "isDirect": true,
+      "severity": "high",
+      "published": "2024-03-12T00:00:00Z",
+      "isNew": false,
+      "inKev": false,
+      "epss": 0.05,
+      "status": "likely_affected",
+      "riskScore": 62,
+      "scoreBreakdown": { "severity": 30, "epss": 2, "semgrep": 15, "direct": 10, "fixAvailable": 5 },
+      "evidence": [{ "ruleId": "lodash-merge-user-input", "file": "src/routes/settings.js", "line": 14 }],
+      "sources": ["osv", "ghsa"],
+      "simulated": false,
+      "advice": {
+        "summary": "The settings route merges request data into a config object with a vulnerable lodash version.",
+        "attackPath": {
+          "entryPoint": "POST /settings",
+          "howItReachesYou": "src/routes/settings.js:14 passes req.body into _.merge.",
+          "impact": "An attacker could add unexpected properties to shared objects, which can change application behavior."
+        },
+        "exploitedInWild": "Not in CISA KEV; EPSS 5%",
+        "fix": { "action": "Upgrade lodash", "targetVersion": "4.17.21", "verified": true },
+        "confidenceNote": "Likely affected based on current evidence."
+      },
+      "evidenceCheck": "passed"
+    },
+    {
+      "canonicalId": "CVE-FIXTURE-0004",
+      "aliases": ["GHSA-fixt-0004-dddd"],
+      "title": "Prototype pollution",
+      "package": "minimist",
+      "installedVersion": "1.2.5",
+      "fixedVersion": "1.2.6",
+      "isDirect": true,
+      "severity": "high",
+      "published": "2023-06-01T00:00:00Z",
+      "isNew": false,
+      "inKev": false,
+      "epss": 0.01,
+      "status": "potentially_affected",
+      "riskScore": 45,
+      "scoreBreakdown": { "severity": 30, "direct": 10, "fixAvailable": 5 },
+      "evidence": [],
+      "sources": ["osv"],
+      "simulated": false,
+      "advice": {
+        "summary": "Upgrade minimist to 1.2.6. No usage was found in the scanned code.",
+        "attackPath": {
+          "entryPoint": "None found",
+          "howItReachesYou": "minimist is installed but no code in src/ imports it.",
+          "impact": "Low unless a future change starts using it with untrusted input."
+        },
+        "exploitedInWild": "Not in CISA KEV; EPSS 1%",
+        "fix": { "action": "Upgrade minimist", "targetVersion": "1.2.6", "verified": true },
+        "confidenceNote": "Potentially affected based on current evidence."
+      },
+      "evidenceCheck": "fallback"
+    }
+  ]
+}
