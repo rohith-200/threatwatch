@@ -9,6 +9,7 @@ node_modules/
 dist/
 build/
 coverage/
+fixtures/cache/*.json
 
 # Temporary clones of analyzed repos
 tmp/

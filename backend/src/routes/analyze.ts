@@ -1,10 +1,12 @@
 // POST /api/analyze
-// Ingest (A3) is real. The other steps are still fake and get replaced one by one.
+// Ingest (A3) and threat search (A4: OSV, GitHub count, KEV, EPSS) are real.
+// The remaining steps are still fake and get replaced one by one.
 
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import type { AnalyzeRequest, ProgressEvent, StepName } from "../../../shared/types.js";
 import { IngestError, ingestRepo, removeClone, type IngestResult } from "../ingest/index.js";
+import { addExploitSignals, countRecentNpmAdvisories, searchOsv, type RawAdvisory } from "../threats/index.js";
 
 const REPO_URL = /^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}\/?$/;
 const LOOKBACKS = [7, 30, 90];
@@ -12,9 +14,6 @@ const STEP_DELAY_MS = 700;
 
 // Steps not built yet. Each one is removed from this list when its real version lands.
 const FAKE_STEPS: { step: StepName; running: string; done: (days: number) => string; count?: number }[] = [
-  { step: "osv", running: "Querying OSV", done: () => "OSV: 11 advisories match your packages", count: 11 },
-  { step: "ghsa", running: "Checking GitHub advisories", done: (d) => `GitHub: 1,240 npm advisories from the last ${d} days checked`, count: 1240 },
-  { step: "kev", running: "Checking CISA KEV", done: () => "CISA KEV: 19 newly exploited vulnerabilities checked", count: 19 },
   { step: "semgrep", running: "Semgrep: scanning src/", done: () => "Semgrep: 2 code matches", count: 2 },
   { step: "score", running: "Scoring and prioritizing", done: () => "Scored 4 alerts", count: 4 },
   { step: "advice", running: "Writing advice with AkashML", done: () => "Advice written for 4 alerts", count: 4 },
@@ -76,6 +75,51 @@ export async function analyzeRoutes(app: FastifyInstance) {
         count: ingest.dependencies.length,
       });
       request.log.info({ analysisId, repo: `${ingest.owner}/${ingest.repo}`, commit: ingest.commit, deps: ingest.dependencies.length }, "ingest done");
+
+      // A4: OSV (vulnerabilities and malicious packages affecting the installed versions)
+      send({ type: "progress", step: "osv", status: "running", message: `Querying OSV for ${ingest.dependencies.length} packages` });
+      const osv = await searchOsv(ingest.dependencies);
+      const advisories: RawAdvisory[] = osv.advisories;
+      const affectedPackages = new Set(advisories.map((a) => a.package)).size;
+      send({
+        type: "progress",
+        step: "osv",
+        status: "done",
+        message: `OSV: ${advisories.length} advisories match ${affectedPackages} of your packages${osv.fromCache ? " (cached data)" : ""}`,
+        count: advisories.length,
+      });
+
+      // A4: GitHub advisory count for the coverage line (not used for matching)
+      send({ type: "progress", step: "ghsa", status: "running", message: "Checking recent GitHub advisories" });
+      const ghsa = await countRecentNpmAdvisories(lookbackDays);
+      send({
+        type: "progress",
+        step: "ghsa",
+        status: "done",
+        message:
+          ghsa.count === null
+            ? "GitHub advisory count unavailable right now"
+            : `GitHub: ${ghsa.count.toLocaleString("en-US")}${ghsa.capped ? "+" : ""} npm advisories from the last ${lookbackDays} days checked`,
+        count: ghsa.count ?? undefined,
+      });
+
+      // A4: CISA KEV (exploited in the wild) and EPSS (exploit probability)
+      send({ type: "progress", step: "kev", status: "running", message: "Checking CISA KEV and EPSS" });
+      const signals = await addExploitSignals(advisories, lookbackDays);
+      const inKev = advisories.filter((a) => a.inKev).length;
+      send({
+        type: "progress",
+        step: "kev",
+        status: "done",
+        message: signals.kev.available
+          ? `CISA KEV: ${signals.kev.addedInWindow} added in the last ${lookbackDays} days; ${inKev} of your matches listed`
+          : "CISA KEV unavailable right now; continuing without it",
+        count: signals.kev.addedInWindow,
+      });
+      request.log.info(
+        { analysisId, advisories: advisories.length, inKev, epss: signals.epssCount, ghsa: ghsa.count },
+        "threat search done",
+      );
 
       // Remaining steps: still fake
       for (const s of FAKE_STEPS) {
