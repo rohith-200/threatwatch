@@ -48,7 +48,7 @@ export async function explainFinding(finding: Finding): Promise<string> {
       {
         role: "system",
         content:
-          "Explain security findings using only the supplied structured evidence. Do not invent IDs, versions, files, lines, impacts, or exploit claims. Do not provide exploit code or payloads.",
+          "Return JSON only, with exactly this shape: {\"summary\":\"string\",\"attackPath\":{\"entryPoint\":\"string\",\"howItReachesYou\":\"string\",\"impact\":\"string\"},\"exploitedInWild\":\"string\",\"fix\":{\"action\":\"string\",\"targetVersion\":\"string or null\",\"verified\":\"boolean\"},\"confidenceNote\":\"string\"}. Do not use Markdown or code fences. Use only the supplied structured evidence. Never invent IDs, versions, files, lines, impacts, or exploit claims. Do not provide exploit code or payloads. Never say breached or compromised.",
       },
       {
         role: "user",
