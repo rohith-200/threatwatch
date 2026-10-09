@@ -1,16 +1,17 @@
 // POST /api/analyze
-// STUB VERSION: streams fake progress events so Person B can build the input screen.
-// Each fake step will be replaced by the real pipeline step (ingest, OSV, Semgrep, ...).
+// Ingest (A3) is real. The other steps are still fake and get replaced one by one.
 
 import type { FastifyInstance } from "fastify";
+import { randomUUID } from "node:crypto";
 import type { AnalyzeRequest, ProgressEvent, StepName } from "../../../shared/types.js";
+import { IngestError, ingestRepo, removeClone, type IngestResult } from "../ingest/index.js";
 
 const REPO_URL = /^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}\/?$/;
 const LOOKBACKS = [7, 30, 90];
 const STEP_DELAY_MS = 700;
 
+// Steps not built yet. Each one is removed from this list when its real version lands.
 const FAKE_STEPS: { step: StepName; running: string; done: (days: number) => string; count?: number }[] = [
-  { step: "ingest", running: "Reading package-lock.json", done: () => "Read 186 dependencies (9 direct)", count: 186 },
   { step: "osv", running: "Querying OSV", done: () => "OSV: 11 advisories match your packages", count: 11 },
   { step: "ghsa", running: "Checking GitHub advisories", done: (d) => `GitHub: 1,240 npm advisories from the last ${d} days checked`, count: 1240 },
   { step: "kev", running: "Checking CISA KEV", done: () => "CISA KEV: 19 newly exploited vulnerabilities checked", count: 19 },
@@ -22,20 +23,27 @@ const FAKE_STEPS: { step: StepName; running: string; done: (days: number) => str
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+let busy = false; // one analysis at a time
+
 export async function analyzeRoutes(app: FastifyInstance) {
   app.post<{ Body: AnalyzeRequest }>("/api/analyze", async (request, reply) => {
     const body = (request.body ?? {}) as Partial<AnalyzeRequest>;
 
-    // Validate before streaming, so bad input gets a normal 400 response.
     if (typeof body.repoUrl !== "string" || !REPO_URL.test(body.repoUrl.trim())) {
       return reply.code(400).send({ error: "Enter a GitHub repo URL like https://github.com/owner/repo" });
     }
     if (typeof body.lookbackDays !== "number" || !LOOKBACKS.includes(body.lookbackDays)) {
       return reply.code(400).send({ error: "lookbackDays must be 7, 30 or 90" });
     }
-    const lookbackDays = body.lookbackDays;
+    if (busy) {
+      return reply.code(409).send({ error: "Another analysis is running. Try again in a minute." });
+    }
+    busy = true;
 
-    // Take over the raw response so Fastify doesn't send its own reply.
+    const repoUrl = body.repoUrl.trim();
+    const lookbackDays = body.lookbackDays;
+    const analysisId = `an_${randomUUID().slice(0, 8)}`;
+
     reply.hijack();
     const res = reply.raw;
     res.writeHead(200, {
@@ -49,23 +57,43 @@ export async function analyzeRoutes(app: FastifyInstance) {
     res.on("close", () => {
       closed = true;
     });
-
     const send = (event: ProgressEvent) => {
       if (!closed) res.write(`data: ${JSON.stringify(event)}\n\n`);
     };
 
+    let ingest: IngestResult | null = null;
+
     try {
+      // A3: real ingest
+      send({ type: "progress", step: "ingest", status: "running", message: "Reading package.json and package-lock.json" });
+      ingest = await ingestRepo(repoUrl, analysisId);
+      const lockNote = ingest.hasLockfile ? "" : ", no lockfile so versions are estimated";
+      send({
+        type: "progress",
+        step: "ingest",
+        status: "done",
+        message: `Read ${ingest.dependencies.length} dependencies (${ingest.directCount} direct${lockNote})`,
+        count: ingest.dependencies.length,
+      });
+      request.log.info({ analysisId, repo: `${ingest.owner}/${ingest.repo}`, commit: ingest.commit, deps: ingest.dependencies.length }, "ingest done");
+
+      // Remaining steps: still fake
       for (const s of FAKE_STEPS) {
         if (closed) return;
         send({ type: "progress", step: s.step, status: "running", message: s.running });
         await sleep(STEP_DELAY_MS);
         send({ type: "progress", step: s.step, status: "done", message: s.done(lookbackDays), count: s.count });
       }
+
+      // Until saveReport is real, point the UI at the fixture report.
       send({ type: "result", analysisId: "an_fixture_001" });
     } catch (err) {
-      request.log.error(err);
-      send({ type: "error", message: "The analysis failed. Try again." });
+      request.log.error({ analysisId, err: err instanceof Error ? err.message : String(err) }, "analysis failed");
+      const message = err instanceof IngestError ? err.userMessage : "The analysis failed. Try again.";
+      send({ type: "error", message });
     } finally {
+      await removeClone(ingest?.cloneDir ?? null);
+      busy = false;
       if (!closed) res.end();
     }
   });
