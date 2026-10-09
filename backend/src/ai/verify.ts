@@ -32,11 +32,13 @@ function collectStrings(value: unknown): string[] {
 
 function isAdvice(value: unknown): value is Advice {
   if (!isRecord(value) || !isRecord(value.attackPath) || !isRecord(value.fix)) return false;
+  const attackPath = value.attackPath;
+  const fix = value.fix;
   return ["summary", "exploitedInWild", "confidenceNote"].every((key) => typeof value[key] === "string")
-    && ["entryPoint", "howItReachesYou", "impact"].every((key) => typeof value.attackPath[key] === "string")
-    && typeof value.fix.action === "string"
-    && (value.fix.targetVersion === null || typeof value.fix.targetVersion === "string")
-    && typeof value.fix.verified === "boolean";
+    && ["entryPoint", "howItReachesYou", "impact"].every((key) => typeof attackPath[key] === "string")
+    && typeof fix.action === "string"
+    && (fix.targetVersion === null || typeof fix.targetVersion === "string")
+    && typeof fix.verified === "boolean";
 }
 
 export function verifyAdvice(finding: Finding, advice: unknown): Advice | null {
