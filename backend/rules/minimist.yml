@@ -1,0 +1,22 @@
+# Semgrep rules for minimist advisories.
+
+rules:
+  - id: minimist-usage
+    languages: [javascript, typescript]
+    severity: INFO
+    message: minimist parses arguments here. Prototype pollution is possible on vulnerable minimist versions if the arguments can be influenced by an attacker.
+    metadata:
+      package: minimist
+      advisories: [GHSA-xvch-5gv4-984h]
+    pattern-either:
+      - pattern: require("minimist")(...)
+      - patterns:
+          - pattern-inside: |
+              $M = require("minimist");
+              ...
+          - pattern: $M(...)
+      - patterns:
+          - pattern-inside: |
+              import $M from "minimist";
+              ...
+          - pattern: $M(...)

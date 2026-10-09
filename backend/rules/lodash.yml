@@ -1,0 +1,81 @@
+# Semgrep rules for lodash 4.17.x advisories.
+# Each rule lists the exact advisory IDs it is evidence for (metadata.advisories).
+# A hit only upgrades those advisories to "likely affected", never the package's other ones.
+
+rules:
+  - id: lodash-set-user-path
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: A lodash path setter is called with a path taken from the request. Prototype pollution is possible on vulnerable lodash versions.
+    metadata:
+      package: lodash
+      advisories: [GHSA-p6mc-m468-83gw]
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: $LODASH.$FN($OBJ, <... req.$SRC ...>, ...)
+              - metavariable-regex:
+                  metavariable: $FN
+                  regex: ^(set|setWith|update|updateWith)$
+          - pattern: $LODASH.zipObjectDeep(<... req.$SRC ...>, ...)
+      - metavariable-regex:
+          metavariable: $LODASH
+          regex: ^(_|lodash)$
+      - metavariable-regex:
+          metavariable: $SRC
+          regex: ^(body|query|params|headers|cookies)$
+
+  - id: lodash-template-user-input
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: lodash _.template is called with request data as the template or its options. Code injection is possible on vulnerable lodash versions.
+    metadata:
+      package: lodash
+      advisories: [GHSA-35jh-r3h4-6jhm, GHSA-r5fr-rjxr-66jc]
+    patterns:
+      - pattern-either:
+          - pattern: $LODASH.template(<... req.$SRC ...>, ...)
+          - pattern: $LODASH.template($T, <... req.$SRC ...>)
+      - metavariable-regex:
+          metavariable: $LODASH
+          regex: ^(_|lodash)$
+      - metavariable-regex:
+          metavariable: $SRC
+          regex: ^(body|query|params|headers|cookies)$
+
+  - id: lodash-unset-user-path
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: lodash _.unset or _.omit is called with a path taken from the request. Prototype pollution is possible on vulnerable lodash versions.
+    metadata:
+      package: lodash
+      advisories: [GHSA-f23m-r3pf-42rh, GHSA-xxjr-mmjv-4gpg]
+    patterns:
+      - pattern-either:
+          - pattern: $LODASH.unset($OBJ, <... req.$SRC ...>)
+          - pattern: $LODASH.omit($OBJ, <... req.$SRC ...>, ...)
+      - metavariable-regex:
+          metavariable: $LODASH
+          regex: ^(_|lodash)$
+      - metavariable-regex:
+          metavariable: $SRC
+          regex: ^(body|query|params|headers|cookies)$
+
+  - id: lodash-redos-user-input
+    languages: [javascript, typescript]
+    severity: INFO
+    message: lodash trim or toNumber runs on request data. Very long inputs can cause slow regex processing (ReDoS) on vulnerable lodash versions.
+    metadata:
+      package: lodash
+      advisories: [GHSA-29mw-wpgm-hmr9]
+    patterns:
+      - pattern: $LODASH.$FN(<... req.$SRC ...>, ...)
+      - metavariable-regex:
+          metavariable: $LODASH
+          regex: ^(_|lodash)$
+      - metavariable-regex:
+          metavariable: $FN
+          regex: ^(trim|trimEnd|toNumber)$
+      - metavariable-regex:
+          metavariable: $SRC
+          regex: ^(body|query|params|headers|cookies)$
