@@ -3,7 +3,7 @@
 // Person B later replaces each stub body with a call to the real module
 // (ai/, store/, observability/). The signatures must not change without agreement.
 
-import type { Finding, Report } from "../../shared/types";
+import type { Finding, Report } from "../../shared/types.js";
 
 export interface TraceMeta {
   analysisId: string;
