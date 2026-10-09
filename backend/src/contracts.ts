@@ -4,6 +4,7 @@
 // (ai/, store/, observability/). The signatures must not change without agreement.
 
 import type { Finding, Report } from "../../shared/types";
+import { explainFindings as runAdvice } from "./ai/advice.js";
 
 export interface TraceMeta {
   analysisId: string;
@@ -36,7 +37,7 @@ export const startTrace: StartTrace = async () => ({ id: null });
 
 export const withSpan: WithSpan = async (_trace, _name, fn) => fn();
 
-export const explainFindings: ExplainFindings = async (findings) =>
-  findings.map((f) => ({ ...f, advice: null, evidenceCheck: "not_run" as const }));
+export const explainFindings: ExplainFindings = async (findings, _trace) =>
+  runAdvice(findings);
 
 export const saveReport: SaveReport = async () => {};
