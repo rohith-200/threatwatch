@@ -1,27 +1,19 @@
 // POST /api/analyze
-// Ingest (A3) and threat search (A4: OSV, GitHub count, KEV, EPSS) are real.
-// The remaining steps are still fake and get replaced one by one.
+// Full pipeline: ingest (A3), threat search (A4), Semgrep (A6), classify and score (A5 + A7),
+// AI advice (Person B, via contracts.ts) and save. Every step is real.
 
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
-import type { AnalyzeRequest, ProgressEvent, StepName } from "../../../shared/types.js";
+import type { AnalyzeRequest, ProgressEvent, Report } from "../../../shared/types.js";
 import { IngestError, ingestRepo, removeClone, type IngestResult } from "../ingest/index.js";
 import { addExploitSignals, countRecentNpmAdvisories, searchOsv, type RawAdvisory } from "../threats/index.js";
+import { evidenceFor, runSemgrep } from "../analysis/semgrep.js";
+import { classify } from "../analysis/classify.js";
+import { previousReportFor, rememberReport } from "../analysis/memoryStore.js";
+import { explainFindings, saveReport } from "../contracts.js";
 
 const REPO_URL = /^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}\/?$/;
 const LOOKBACKS = [7, 30, 90];
-const STEP_DELAY_MS = 700;
-
-// Steps not built yet. Each one is removed from this list when its real version lands.
-const FAKE_STEPS: { step: StepName; running: string; done: (days: number) => string; count?: number }[] = [
-  { step: "semgrep", running: "Semgrep: scanning src/", done: () => "Semgrep: 2 code matches", count: 2 },
-  { step: "score", running: "Scoring and prioritizing", done: () => "Scored 4 alerts", count: 4 },
-  { step: "advice", running: "Writing advice with AkashML", done: () => "Advice written for 4 alerts", count: 4 },
-  { step: "save", running: "Saving analysis", done: () => "Analysis saved" },
-];
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 let busy = false; // one analysis at a time
 
 export async function analyzeRoutes(app: FastifyInstance) {
@@ -121,16 +113,86 @@ export async function analyzeRoutes(app: FastifyInstance) {
         "threat search done",
       );
 
-      // Remaining steps: still fake
-      for (const s of FAKE_STEPS) {
-        if (closed) return;
-        send({ type: "progress", step: s.step, status: "running", message: s.running });
-        await sleep(STEP_DELAY_MS);
-        send({ type: "progress", step: s.step, status: "done", message: s.done(lookbackDays), count: s.count });
-      }
+      // A6: Semgrep code evidence on the shallow clone
+      send({ type: "progress", step: "semgrep", status: "running", message: "Semgrep: scanning the code for vulnerable usage" });
+      const semgrep = await runSemgrep(ingest.cloneDir);
+      const withEvidence = advisories.filter((a) => evidenceFor(a.package, [a.id, ...a.aliases], semgrep.hits).length > 0);
+      send({
+        type: "progress",
+        step: "semgrep",
+        status: "done",
+        message: semgrep.available
+          ? `Semgrep: ${semgrep.hits.length} code ${semgrep.hits.length === 1 ? "match" : "matches"}, linked to ${withEvidence.length} ${withEvidence.length === 1 ? "advisory" : "advisories"}`
+          : "Semgrep unavailable; continuing without code evidence",
+        count: semgrep.hits.length,
+      });
+      request.log.info(
+        { analysisId, semgrepHits: semgrep.hits.map((h) => `${h.ruleId} ${h.file}:${h.line}`), linked: withEvidence.map((a) => a.id), semgrepError: semgrep.error },
+        "semgrep done",
+      );
 
-      // Until saveReport is real, point the UI at the fixture report.
-      send({ type: "result", analysisId: "an_fixture_001" });
+      // A5 + A7: dedupe, classify, score
+      send({ type: "progress", step: "score", status: "running", message: "Scoring and prioritizing" });
+      let findings = classify(advisories, semgrep.hits, lookbackDays);
+      const likely = findings.filter((f) => f.status === "likely_affected").length;
+      send({
+        type: "progress",
+        step: "score",
+        status: "done",
+        message: `${findings.length} ${findings.length === 1 ? "alert" : "alerts"}: ${likely} likely affected, ${findings.length - likely} potentially affected`,
+        count: findings.length,
+      });
+
+      // AI advice (Person B's code; falls back to template advice on any failure)
+      if (closed) return;
+      send({ type: "progress", step: "advice", status: "running", message: "Writing advice with AkashML" });
+      findings = await explainFindings(findings, { id: null });
+      const passed = findings.filter((f) => f.evidenceCheck === "passed").length;
+      const advised = findings.filter((f) => f.advice !== null).length;
+      send({
+        type: "progress",
+        step: "advice",
+        status: "done",
+        message: `Advice written for ${advised} ${advised === 1 ? "alert" : "alerts"} (${passed} passed evidence checks)`,
+        count: advised,
+      });
+
+      // Build and save the report
+      send({ type: "progress", step: "save", status: "running", message: "Saving analysis" });
+      const repo = `${ingest.owner}/${ingest.repo}`;
+      const previous = previousReportFor(repo);
+      const previousIds = new Set(previous?.alerts.map((f) => f.canonicalId) ?? []);
+      const newCount = findings.filter((f) => f.isNew).length;
+      const report: Report = {
+        analysisId,
+        repo,
+        commit: ingest.commit,
+        analyzedAt: new Date().toISOString(),
+        lookbackDays: lookbackDays as Report["lookbackDays"],
+        traceId: null,
+        coverage: {
+          dependencies: ingest.dependencies.length,
+          directDependencies: ingest.directCount,
+          recentAdvisoriesChecked: ghsa.count ?? 0,
+          kevChecked: signals.kev.addedInWindow,
+          threatDataFetchedAt: new Date().toISOString(),
+          newestAdvisoryPublished: ghsa.newestPublished,
+          fromCache: osv.fromCache || signals.kev.fromCache,
+        },
+        summary: {
+          newAffecting: newCount,
+          knownAffecting: findings.length - newCount,
+          notAffecting: Math.max(0, (ghsa.count ?? 0) - newCount),
+          sinceLastAnalysis: previous ? findings.filter((f) => !previousIds.has(f.canonicalId)).length : null,
+        },
+        alerts: findings,
+      };
+      rememberReport(report);   // temporary: lets the UI load it before ClickHouse storage lands
+      await saveReport(report); // Person B's ClickHouse store (a no-op stub until it's ready)
+      send({ type: "progress", step: "save", status: "done", message: "Analysis saved" });
+      request.log.info({ analysisId, alerts: findings.length, likely, adviceChecksPassed: passed }, "analysis done");
+
+      send({ type: "result", analysisId });
     } catch (err) {
       request.log.error({ analysisId, err: err instanceof Error ? err.message : String(err) }, "analysis failed");
       const message = err instanceof IngestError ? err.userMessage : "The analysis failed. Try again.";

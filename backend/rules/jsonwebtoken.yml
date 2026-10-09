@@ -1,0 +1,21 @@
+# Semgrep rules for jsonwebtoken 8.x advisories.
+# Check the advisory ID against your OSV results (see the A6 steps) and edit if it differs.
+
+rules:
+  - id: jwt-verify-no-algorithms
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: jwt.verify is called without an explicit algorithms list. On vulnerable jsonwebtoken versions this can allow tokens signed with an unexpected algorithm.
+    metadata:
+      package: jsonwebtoken
+      advisories: [GHSA-qwph-4952-7xr6]
+    patterns:
+      - pattern-either:
+          - pattern: $JWT.verify($TOKEN, $KEY)
+          - pattern: $JWT.verify($TOKEN, $KEY, $ARG3)
+          - pattern: $JWT.verify($TOKEN, $KEY, $ARG3, $ARG4)
+      - pattern-not: |
+          $JWT.verify($TOKEN, $KEY, {..., algorithms: $ALGS, ...}, ...)
+      - metavariable-regex:
+          metavariable: $JWT
+          regex: ^(jwt|jsonwebtoken|JWT)$
