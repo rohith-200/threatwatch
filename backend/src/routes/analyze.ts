@@ -11,6 +11,7 @@ import { evidenceFor, runSemgrep } from "../analysis/semgrep.js";
 import { classify } from "../analysis/classify.js";
 import { previousReportFor, rememberReport } from "../analysis/memoryStore.js";
 import { explainFindings, saveReport } from "../contracts.js";
+import { previousAlertIds } from "../store/clickhouse.js";
 
 const REPO_URL = /^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}\/?$/;
 const LOOKBACKS = [7, 30, 90];
@@ -160,8 +161,17 @@ export async function analyzeRoutes(app: FastifyInstance) {
       // Build and save the report
       send({ type: "progress", step: "save", status: "running", message: "Saving analysis" });
       const repo = `${ingest.owner}/${ingest.repo}`;
-      const previous = previousReportFor(repo);
-      const previousIds = new Set(previous?.alerts.map((f) => f.canonicalId) ?? []);
+      // Alerts from this repo's previous analysis: ClickHouse first, memory as fallback.
+      let previousIds: Set<string> | null = null;
+      try {
+        previousIds = await previousAlertIds(repo);
+      } catch (err) {
+        request.log.warn({ err: err instanceof Error ? err.message : String(err) }, "ClickHouse lookup failed");
+      }
+      if (!previousIds) {
+        const prev = previousReportFor(repo);
+        previousIds = prev ? new Set(prev.alerts.map((f) => f.canonicalId)) : null;
+      }
       const newCount = findings.filter((f) => f.isNew).length;
       const report: Report = {
         analysisId,
@@ -183,13 +193,19 @@ export async function analyzeRoutes(app: FastifyInstance) {
           newAffecting: newCount,
           knownAffecting: findings.length - newCount,
           notAffecting: Math.max(0, (ghsa.count ?? 0) - newCount),
-          sinceLastAnalysis: previous ? findings.filter((f) => !previousIds.has(f.canonicalId)).length : null,
+          sinceLastAnalysis: previousIds ? findings.filter((f) => !previousIds!.has(f.canonicalId)).length : null,
         },
         alerts: findings,
       };
-      rememberReport(report);   // temporary: lets the UI load it before ClickHouse storage lands
-      await saveReport(report); // Person B's ClickHouse store (a no-op stub until it's ready)
-      send({ type: "progress", step: "save", status: "done", message: "Analysis saved" });
+      rememberReport(report); // in-memory copy: the UI can load it even if ClickHouse is down
+      let savedTo = "ClickHouse";
+      try {
+        await saveReport(report);
+      } catch (err) {
+        savedTo = "memory only";
+        request.log.warn({ analysisId, err: err instanceof Error ? err.message : String(err) }, "ClickHouse save failed");
+      }
+      send({ type: "progress", step: "save", status: "done", message: `Analysis saved (${savedTo})` });
       request.log.info({ analysisId, alerts: findings.length, likely, adviceChecksPassed: passed }, "analysis done");
 
       send({ type: "result", analysisId });

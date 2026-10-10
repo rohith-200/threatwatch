@@ -5,6 +5,7 @@
 
 import type { Finding, Report } from "../../shared/types.js";
 import { explainFindings as runAdvice } from "./ai/advice.js";
+import { storeReport } from "./store/clickhouse.js";
 
 export interface TraceMeta {
   analysisId: string;
@@ -40,4 +41,4 @@ export const withSpan: WithSpan = async (_trace, _name, fn) => fn();
 export const explainFindings: ExplainFindings = async (findings, _trace) =>
   runAdvice(findings);
 
-export const saveReport: SaveReport = async () => {};
+export const saveReport: SaveReport = async (report) => storeReport(report);
